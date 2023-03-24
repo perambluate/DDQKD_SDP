@@ -4,3 +4,5 @@ figure/
 *.png
 .*
 !.gitignore
+log*
+*.sh
