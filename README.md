@@ -11,7 +11,15 @@ Compute key rate with semidefinite program (SDP) for device-dependent protocol b
 - LinearAlgebra
 - SCS
 - MosekTools (optional)
-> - `SCS` and `MosekTools` are two of the solvers which can be used with `Convex` interface. `SCS` packages includes the executable files, while `MosekTools` is only an interface to Mosek, one needs to install Mosek separately.
+
+> Julia packages Installation
+> For registered Julia packages, one can using the commands
+> ```Julia
+> using Pkg
+> Pkg.update()
+> Pkg.add("Convex")
+> ```
+> For unregistered packages, one needs to use the package name with extension `.jl` such as `QuantumInformation.jl` instead of `QuantumInformation`.
 
 #### @DataSaver
 - DelimitedFiles
@@ -22,12 +30,25 @@ Compute key rate with semidefinite program (SDP) for device-dependent protocol b
 ### SDP Solvers (optional)
 - Mosek
 
+> `SCS` and `MosekTools` are two of the solvers which can be used with `Convex` interface. `SCS` packages includes the executable files, while `MosekTools` is only an interface to Mosek, one needs to install Mosek separately.
+
 ## Installation
-For registered Julia packages, one can using the commands
-```Julia
-using Pkg
-Pkg.update()
-Pkg.add("Convex")
+To use this package, one can either install via `Pkg` or download this repo directly.
+### Install with `Pkg`
+In Julia interface type `]`, you should see
+```
+(v1.1) pkg>
 ```
 
-For unregistered packages, one needs to use the package name with extension `.jl` such as `QuantumInformation.jl` instead of `QuantumInformation`.
+Then install package with `add`
+```
+(v1.1) pkg> add https://github.com/perambluate/DDQKD_SDP.jl
+```
+
+### Download from GitHub
+#### With `git` command
+```bash
+git clone https://github.com/perambluate/DDQKD_SDP.git
+```
+#### Download as zip
+In the GitHub repo page, click `< >code` bottom, and you will see `Download ZIP`.
