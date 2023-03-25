@@ -1,36 +1,18 @@
 include("./DDQKD_araujo.jl")
 include("./DataSaver.jl")
-using .DDQKD_aroujo, .DataSaver
+using .DDQKD_araujo, .DataSaver
 using QuantumInformation, LinearAlgebra
 using Combinatorics: factorial, doublefactorial
 using Printf
 
 ### Quaternary entropy
 function ShannonEntropy(Prob::AbstractArray{<:Real, 2})
-    entropy = -Prob.*log.(Prob)
+    entropy = -Prob.*log2.(Prob)
     nancheck = isnan.(entropy)
     entropy = entropy.*.!(nancheck)
     return sum(entropy)
 end
 function errorCorrectionCost(Prob::AbstractArray{<:Real, 2})
-    #=
-    num_inp, num_out = size(Prob)
-    entropy = 0
-    for i in 1:num_inp
-        p_i = sum(Prob[i,:])
-        if p_i == 0
-            continue
-        end
-        entropy_per_inp = 0
-        for j in 1:num_out
-            if Prob[i,j] == 0
-                continue
-            end
-            entropy_per_inp += -Prob[i,j]*log2(Prob[i,j]/p_i)
-        end
-        entropy += entropy_per_inp*p_i
-    end
-    =#
     H_AB = ShannonEntropy(Prob)
     H_A = ShannonEntropy(sum(Prob, dims=1))
     return H_AB - H_A
@@ -64,6 +46,10 @@ function annihilation(dim::Integer)
     return operator
 end
 
+function numberOperator(dim::Integer)
+    return Diagonal(Array(0:dim-1))
+end
+
 function gammaIntegral(m::Integer)
     if m % 2 == 0
         return Float64.( doublefactorial(m-1) / (2^(Int(m/2)+1)) * sqrt(pi) )
@@ -72,22 +58,6 @@ function gammaIntegral(m::Integer)
         return factorial(k)/2
     end
 end
-
-# function supportBasis(region::Integer, dim::Integer)
-#     _ket = zeros(ComplexF64, dim)
-#     for m in 1:dim
-#         if m == 1
-#             _ket[m] = 1/4
-#         else
-#             m_fock = m-1
-#             angle_part = 2/m_fock * sin(m_fock*pi/4) * exp(im*m_fock*(region-1)*pi/2)
-#             coeff = 1/(pi*sqrt(factorial(m_fock))) * angle_part * gammaIntegral(m_fock+1)
-#             _ket[m] = coeff
-#         end
-#     end
-
-#     return _ket
-# end
 
 function regionMeasurement(region::Integer, dim::Integer)
     operator = zeros(dim, dim)
@@ -109,25 +79,27 @@ function regionMeasurement(region::Integer, dim::Integer)
     return operator
 end
 
-
 NUM_QUAD = 10     # Number of nodes in Guass-Radau quadrature
 INPUT = 1         # The specific input for key generation
-                  # (for heterodyne measurement we only have one input)
-# ALPHA = 0.7       # Displacement of the coherent state
+                    # (for heterodyne measurement we only have one input)
 N_CUTOFF = 15     # Photon number cutoff
-data_alpha = Array(0.1:0.2:3.0)
-data_size = length(data_alpha)
-data_hAE = zeros(data_size)
-data_ec_cost = zeros(data_size)
-data_key_rate = zeros(data_size)
-eta = 0.5
-@time begin
-    for i in 1:data_size
-        ALPHA = data_alpha[i]
-        dim_B = N_CUTOFF + 1
+# ALPHA = 0.7       # Displacement of the coherent state
+# ETA = 0.5         # The noise level during the transmission
+data_alpha = [2.0] #[Array(0.1:0.2:2.0); 2.0; 2.2]
+num_alpha = length(data_alpha)
 
-        # PreparedStates = [coherentState(ALPHA, dim_B), coherentState(im*ALPHA, dim_B),
-        #                     coherentState(-ALPHA, dim_B), coherentState(-im*ALPHA, dim_B)]
+# data_eta = Array(0.9:-0.1:0.1)
+# num_eta = length(data_eta)
+
+data_hAE = zeros(num_alpha)
+data_ec_cost = zeros(num_alpha)
+data_key_rate = zeros(num_alpha)
+eta = 0.9
+
+@time begin
+    for i in 1:num_alpha
+        alpha = data_alpha[i]
+        dim_B = N_CUTOFF + 1
 
         # posQuadOp = (creation(dim_B)' + creation(dim_B))./2
         # momQuadOp = (creation(dim_B)' - creation(dim_B)).*im./2
@@ -153,53 +125,59 @@ eta = 0.5
         dim = num_out.*num_inp
         num_meas_op = prod(dim)
 
-        # PostIsometry = zeros(ComplexF64, dim_AB*dim_A, dim_AB)
-        # for i in 1:num_out[2]
-        #     if i != 4
-        #         global PostIsometry += kron(ket(i, num_out[2]), I(dim_A), sqrt(B[:,:,i,1]))
-        #     else
-        #         POVM_B = I(dim_B) - sum(B[:,:,:,1];dims=3)
-        #         global PostIsometry += kron(ket(i, num_out[2]), I(dim_A), sqrt(POVM_B[:,:,1]))
-        #     end
-        # end
-        
-        # ket_ideal = 1/2* (kron(ket(1,4), PreparedStates[1]) + kron(ket(2,4), PreparedStates[2])
-        #                     + kron(ket(3,4), PreparedStates[3]) + kron(ket(4,4), PreparedStates[4]))
-        ket_ideal = zeros(ComplexF64, dim_AB*dim_B)
-        for i in 1:4
-            ket_ideal += 1/2*kron(ket(i,4), coherentState(sqrt(eta)*ALPHA*im^(i-1), dim_B), coherentState(sqrt(1-eta)*ALPHA*im^(i-1), dim_B))
+        ket_ideal = 1/2* (kron(ket(1,4), coherentState(alpha, dim_B))
+                            + kron(ket(2,4), coherentState(alpha*im, dim_B))
+                            + kron(ket(3,4), coherentState(-alpha, dim_B))
+                            + kron(ket(4,4), coherentState(-alpha*im, dim_B)))
+        ideal_state = proj(ket_ideal)
+        rho_A = QuantumInformation.ptrace(ideal_state, [dim_A, dim_B], 2)
+        ket_noise = zeros(ComplexF64, dim_AB*dim_B)
+        for k in 1:4
+            ket_noise += 1/2*kron(ket(k,4),
+            coherentState(sqrt(eta)*alpha*im^(k-1), dim_B),
+            coherentState(sqrt(1-eta)*alpha*im^(k-1), dim_B))
         end
-        noisy_state = QuantumInformation.ptrace(proj(ket_ideal), [dim_A, dim_B, dim_B], 3)
+        noisy_state = QuantumInformation.ptrace(proj(ket_noise), [dim_A, dim_B, dim_B], 3)
+        rho_B = QuantumInformation.ptrace(noisy_state, [dim_A, dim_B], 1)
 
-        _eigvals = eigvals(noisy_state)
-        num_nozero_eigvals = sum(sqrt.(conj.(_eigvals).*_eigvals).>1e-6)
-        Isometry = eigvecs(noisy_state)[:,dim_AB-num_nozero_eigvals:dim_AB]
+        # _eigvals = eigvals(noisy_state)
+        # num_nozero_eigvals = sum(sqrt.(conj.(_eigvals).*_eigvals).>1e-6)
+        Isometry = eigvecs(noisy_state)[:,dim_AB-3:dim_AB]
         # for i in 1:num_out[1]
         #     for j in 1:num_out[2]
         #         Isometry[:,(i-1)*4+j] += kron(ket(i,dim_A), Bob_bases[:, j])
         #     end
         # end
-
         # Isometry = Matrix(qr(Isometry).Q)
 
-        # post_state = PostIsometry * noisy_state * PostIsometry'
+        KeyMap = zeros(ComplexF64, dim_AB*dim_A, dim_AB)
+        for i in 1:num_out[2]
+            if i != 4
+                KeyMap += kron(ket(i, num_out[2]), I(dim_A), sqrt(B[:,:,i,1]))
+            else
+                B_last = I(dim_B) - sum(B[:,:,:,1];dims=3)
+                KeyMap += kron(ket(i, num_out[2]), I(dim_A), sqrt(B_last[:,:,1]))
+            end
+        end
+
+
+        post_state = KeyMap * noisy_state * KeyMap'
         # post_state = QuantumInformation.ptrace(post_state, [dim_A, dim_A, dim_B], [2,3])
 
-        full_measurements = DDQKD_aroujo.fullMeasurement(A, dim_A, B, dim_B)
-        observed_statis = DDQKD_aroujo.measurementStatistics(noisy_state, full_measurements)
-
-        rho_A = QuantumInformation.ptrace(noisy_state, [dim_A, dim_B], 2)
-        # rho_B = QuantumInformation.ptrace(noisy_state, [dim_A, dim_B], 1)
-
-        # h_AE, rho_AB = DDQKD_aroujo.singleRoundEntropy(NUM_QUAD, A, INPUT, dim_A, dim_B;
+        full_measurements = DDQKD_araujo.fullMeasurement(A, dim_A, B, dim_B)
+        numberOp = numberOperator(dim_B)
+        statis_check_meas = cat(full_measurements, kron(I(dim_A), numberOp), dims=3)
+        observed_statis = DDQKD_araujo.measurementStatistics(noisy_state, statis_check_meas)
+        # h_AE, rho_AB = DDQKD_araujo.singleRoundEntropy(NUM_QUAD, A, INPUT, dim_A, dim_B;
         #                                         tomography = true, state = noisy_state,
         #                                         solver = "mosek",
         #                                         solver_args = ["INTPNT_CO_TOL_DFEAS" => 1e-7])
 
-        h_AE, omega_AB = DDQKD_aroujo.singleRoundEntropy(NUM_QUAD, A, INPUT, dim_A, dim_B;
-                                                statis_check_meas = full_measurements,
+        h_AE, omega_AB = DDQKD_araujo.singleRoundEntropy(NUM_QUAD, A, INPUT, dim_A, dim_B;
+                                                statis_check_meas = statis_check_meas,
                                                 observed_statis = observed_statis,
                                                 reduce_A = true, rho_A = rho_A,
+                                                reduce_B = true, rho_B = rho_B,
                                                 proj2support = true, isometry = Isometry,
                                                 setNormConstr = true,
                                                 solver = "mosek",
@@ -212,7 +190,7 @@ eta = 0.5
         # display(ptrace(rho_AB, [dim_A, dim_B], 2))
         # display(ptrace(rho_AB, [dim_A, dim_B], 1))
 
-        Prob = DDQKD_aroujo.measurementStatistics(rho_AB, full_measurements,
+        Prob = DDQKD_araujo.measurementStatistics(rho_AB, full_measurements,
                                                     shape = Tuple(dim),
                                                     trans = true)
         # display(Prob)
@@ -230,13 +208,13 @@ end
 data = [data_alpha data_hAE data_ec_cost data_key_rate]
 Header = "alpha, hAE, ec_cost, key_rate"
 println(Header)
-for i in 1:data_size
+for i in 1:num_alpha
     println(join(data[i,:], "\t"))
 end
-#=
+
 ### Save data
-out_dir = "./"
-out_name = @sprintf("dm_cv-ampl_test-cutoff_%d-quad_%d-eta_%.2f.csv", N_CUTOFF, NUM_QUAD, eta)
-out_path = joinpath(out_dir, out_name)
-DataSaver.saveData(data, out_path; header = Header, mode = "a")
-=#
+# out_dir = "./"
+# out_name = @sprintf("dm_cv-ampl_test-cutoff_%d-quad_%d-eta_%.2f.csv",
+#                     N_CUTOFF, NUM_QUAD, eta)
+# out_path = joinpath(out_dir, out_name)
+# DataSaver.saveData(data, out_path; header = Header, mode = "a")

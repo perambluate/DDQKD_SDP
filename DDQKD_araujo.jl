@@ -1,4 +1,4 @@
-module DDQKD_aroujo
+module DDQKD_araujo
 #=
     Compute key rate for device-dependent protocol with Araújo's method (arXiv:2211.05725)
 =#
@@ -321,6 +321,10 @@ function singleRoundEntropy(num_quad::Integer, A::AbstractArray{<:Number, 4},
     end
     
     println("status: ", problem.status)
+
+    # if occursin("INFEASIBLE", problem.status)
+    #     return
+    # end
 
     # for i in 1:num_quad
     #     println(i,"-th quadrature")
