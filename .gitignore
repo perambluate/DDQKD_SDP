@@ -1,6 +1,7 @@
 data/
 figure/
 *.csv
+*.tsv
 *.png
 .*
 !.gitignore
