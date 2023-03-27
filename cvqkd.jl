@@ -82,10 +82,11 @@ end
 NUM_QUAD = 10     # Number of nodes in Guass-Radau quadrature
 INPUT = 1         # The specific input for key generation
                     # (for heterodyne measurement we only have one input)
+PARTY = 1         # The party whose outcomes are taken as a reference for the final key.
 N_CUTOFF = 15     # Photon number cutoff
 # ALPHA = 0.7       # Displacement of the coherent state
 # ETA = 0.5         # The noise level during the transmission
-data_alpha = [2.0] #[Array(0.1:0.2:2.0); 2.0; 2.2]
+data_alpha = Array(0.2:0.2:2.2)
 num_alpha = length(data_alpha)
 
 # data_eta = Array(0.9:-0.1:0.1)
@@ -94,7 +95,7 @@ num_alpha = length(data_alpha)
 data_hAE = zeros(num_alpha)
 data_ec_cost = zeros(num_alpha)
 data_key_rate = zeros(num_alpha)
-eta = 0.9
+eta = 0.01
 
 @time begin
     for i in 1:num_alpha
@@ -173,7 +174,7 @@ eta = 0.9
         #                                         solver = "mosek",
         #                                         solver_args = ["INTPNT_CO_TOL_DFEAS" => 1e-7])
 
-        h_AE, omega_AB = DDQKD_araujo.singleRoundEntropy(NUM_QUAD, A, INPUT, dim_A, dim_B;
+        h_AE, omega_AB = DDQKD_araujo.singleRoundEntropy(NUM_QUAD, B, PARTY, INPUT, dim_A, dim_B;
                                                 statis_check_meas = statis_check_meas,
                                                 observed_statis = observed_statis,
                                                 reduce_A = true, rho_A = rho_A,
