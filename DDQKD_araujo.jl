@@ -146,8 +146,8 @@ function feasibilityCheck(dim::Integer;
 end
 
 ### Compute single round von Neumann entropy by Araújo's method
-function singleRoundEntropy(num_quad::Integer, A::AbstractArray{<:Number, 4},
-                            input::Integer, dim_A::Integer, dim_B::Integer;
+function singleRoundEntropy(num_quad::Integer, meas_cg::AbstractArray{<:Number, 4},
+                            key_ref::Integer, input::Integer, dim_A::Integer, dim_B::Integer;
                             statis_check_meas::AbstractArray{<:Number, 3} = Array{Number}(undef, 0, 0, 0),
                             observed_statis::AbstractArray{<:Number} = Array{Number}(undef, 0),
                             tomography::Bool = false,
@@ -166,7 +166,9 @@ function singleRoundEntropy(num_quad::Integer, A::AbstractArray{<:Number, 4},
     #=
     Inputs:
         - num_quad: Number of quadrature.
-        - A: Alice's measurements in CG form.
+        - meas_cg: Measurements in CG form.
+        - key_ref: The party whose outcomes are taken as a reference for the final key,
+                    0 for Alice; 1 for Bob.
         - dim_A: Dimension of Alice's quantum system.
         - dim_B: Dimension of Bob's quantum system.
         - statis_check_meas: A list of measurements for statistical check.
@@ -182,11 +184,12 @@ function singleRoundEntropy(num_quad::Integer, A::AbstractArray{<:Number, 4},
     t, w = gaussRadau(num_quad)
 
     dim_AB = dim_A*dim_B
-    num_outcome = size(A, 3)+1
+    num_outcome = size(meas_cg, 3)+1
     ### Specify Alice's POVM for given input
-    A_meas = zeros(dim_A, dim_A, num_outcome)
-    A_meas[:,:,1:num_outcome-1] = copy(A[:,:,:,input])
-    A_meas[:,:,end] = I(dim_A)-sum(A[:,:,:,input], dims=3)
+    dim_meas_op = Bool(key_ref) ? dim_B : dim_A
+    meas_all = zeros(eltype(meas_cg), dim_meas_op, dim_meas_op, num_outcome)
+    meas_all[:,:,1:num_outcome-1] = copy(meas_cg[:,:,:,input])
+    meas_all[:,:,end] = I(dim_meas_op)-sum(meas_cg[:,:,:,input], dims=3)
 
     dim = dim_AB
     if proj2support & postMap
@@ -227,28 +230,32 @@ function singleRoundEntropy(num_quad::Integer, A::AbstractArray{<:Number, 4},
     for i in 1:num_quad
         coeff = w[i]/(t[i]*log(2))
         term_in_quad = 0
-        for a in 1:num_outcome
-            zz = zeta[i][a] + zeta[i][a]'
-            zdz = (1-t[i]) * eta[i][a]
-            zzd = t[i] * theta[i][a]
-            if proj2support
-                op_in_support = isometry' * kron(A_meas[:,:,a], I(dim_B)) * isometry
-                term_in_quad += op_in_support * (zz + zdz) + zzd
-            elseif postMap
-                term_in_quad += A_meas[:,:,a]*(zz + zdz) + zzd
+        for n in 1:num_outcome
+            zz = zeta[i][n] + zeta[i][n]'
+            zdz = (1-t[i]) * eta[i][n]
+            zzd = t[i] * theta[i][n]
+            if postMap
+                term_in_quad += meas_all[:,:,n]*(zz + zdz) + zzd
             else
-                term_in_quad += kron(A_meas[:,:,a], I(dim_B))*(zz + zdz) + zzd
+                meas_op = Bool(key_ref) ? kron(I(dim_A), meas_all[:,:,n]) :
+                                    kron(meas_all[:,:,n], I(dim_B))
+                if proj2support
+                    op_in_support = isometry' * meas_op * isometry
+                    term_in_quad += op_in_support * (zz + zdz) + zzd                
+                else
+                    term_in_quad += meas_op*(zz + zdz) + zzd
+                end
             end
 
             ### Matrixes for SDP constraints
             if postMap
                 sigma_tilde = postIsometry * sigma * postIsometry'
                 sigma_tilde = partialtrace(sigma_tilde, 2, [num_outcome, dim_A*dim_B])
-                Gamma_1 = [sigma_tilde zeta[i][a]; zeta[i][a]' eta[i][a]]
-                Gamma_2 = [sigma_tilde zeta[i][a]';zeta[i][a] theta[i][a]]
+                Gamma_1 = [sigma_tilde zeta[i][n]; zeta[i][n]' eta[i][n]]
+                Gamma_2 = [sigma_tilde zeta[i][n]';zeta[i][n] theta[i][n]]
             else
-                Gamma_1 = [sigma zeta[i][a]; zeta[i][a]' eta[i][a]]
-                Gamma_2 = [sigma zeta[i][a]';zeta[i][a] theta[i][a]]
+                Gamma_1 = [sigma zeta[i][n]; zeta[i][n]' eta[i][n]]
+                Gamma_2 = [sigma zeta[i][n]';zeta[i][n] theta[i][n]]
             end
             constraints += [Gamma_1 in :SDP; Gamma_2 in :SDP]
         end
@@ -273,10 +280,10 @@ function singleRoundEntropy(num_quad::Integer, A::AbstractArray{<:Number, 4},
 
     if setNormConstr
         for i in 1:num_quad-1
-            for a in 1:num_outcome
-                constraints += [opnorm(zeta[i][a], 1) <= alpha_list[i]]
-                constraints += [opnorm(eta[i][a], 1) <= alpha_list[i]]
-                constraints += [opnorm(theta[i][a], 1) <= alpha_list[i]]
+            for n in 1:num_outcome
+                constraints += [opnorm(zeta[i][n], 1) <= alpha_list[i]]
+                constraints += [opnorm(eta[i][n], 1) <= alpha_list[i]]
+                constraints += [opnorm(theta[i][n], 1) <= alpha_list[i]]
             end
         end
     end
@@ -329,13 +336,13 @@ function singleRoundEntropy(num_quad::Integer, A::AbstractArray{<:Number, 4},
     # for i in 1:num_quad
     #     println(i,"-th quadrature")
     #     println(alpha_list[i])
-    #     for a in 1:num_outcome
+    #     for n in 1:num_outcome
     #         println("zeta")
-    #         display(norm(evaluate(zeta[i][a])))
+    #         display(norm(evaluate(zeta[i][n])))
     #         println("eta")
-    #         display(norm(evaluate(eta[i][a])))
+    #         display(norm(evaluate(eta[i][n])))
     #         println("theta")
-    #         display(norm(evaluate(theta[i][a])))
+    #         display(norm(evaluate(theta[i][n])))
     #     end
     # end
     rho_AB = evaluate(sigma)
