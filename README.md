@@ -3,7 +3,7 @@ Compute key rate with semidefinite program (SDP) for device-dependent protocol b
 
 ## Prerequisite
 ### Julia packages
-#### @DDQKD_aroujo
+#### @DDQKD_araujo
 - Convex
 - MathOptInterface
 - FastGaussQuadrature
