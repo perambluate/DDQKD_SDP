@@ -9,7 +9,12 @@ import QuantumInformation as QI
 using Printf
 
 SOLVER = "mosek"
-SOLVER_ARGS = ["INTPNT_CO_TOL_DFEAS" => 1e-7]
+NTHREAD_SDP = 1
+WARNING_LEVEL = 0
+LOG_LEVEL = 0
+SOLVER_ARGS = Dict("MSK_IPAR_NUM_THREADS" => NTHREAD_SDP,
+                   "MSK_IPAR_MAX_NUM_WARNINGS" => WARNING_LEVEL,
+                   "MSK_IPAR_LOG" => LOG_LEVEL)
 SAVE = false            # Whether to save the data or not
 NUM_QUAD = 10           # Number of nodes in Guass-Radau quadrature
 INPUT = 1               # The specific input for key generation
@@ -17,10 +22,11 @@ INPUT = 1               # The specific input for key generation
 PARTY = 1               # The party whose outcomes are taken as a reference for the final key
 N_CUTOFF = 15           # Photon number cutoff
 # ALPHA = 0.7           # Displacement of the coherent state
-data_alpha = Array(0.2:0.05:1.2) #[0.7]
+data_alpha = [1.7] #Array(0.5:0.1:2.0)
 num_alpha = length(data_alpha)
 # ETA = 0.01            # The noise level during the transmission
-data_eta = [1]
+data_eta = [0.9]
+xi = 0.01
 num_eta = length(data_eta)
 
 ### General Shannon entropy function
@@ -31,6 +37,7 @@ function ShannonEntropy(Prob::AbstractArray{<:Real, 2})
     return sum(entropy)
 end
 
+### Error correction cost H(B|A)
 function errorCorrectionCost(Prob::AbstractArray{<:Real, 2})
     H_AB = ShannonEntropy(Prob)
     H_A = ShannonEntropy(sum(Prob, dims=1))
@@ -51,9 +58,9 @@ data_key_rate = zeros(num_alpha)
             ### Alice's measurements
             dim_A = 4
             A = zeros(dim_A,dim_A,3,1)
-            A[:,:,1,1] = proj(ket(1,4))
-            A[:,:,2,1] = proj(ket(2,4))
-            A[:,:,3,1] = proj(ket(3,4))
+            A[:,:,1,1] = proj(ket(1,dim_A))
+            A[:,:,2,1] = proj(ket(2,dim_A))
+            A[:,:,3,1] = proj(ket(3,dim_A))
 
             ### Bob's measurements
             B = zeros(ComplexF64, dim_B, dim_B, 3, 1)
@@ -82,39 +89,23 @@ data_key_rate = zeros(num_alpha)
                             photonic.coherentKet(sqrt(1-eta)*alpha*im^(k-1), dim_B))
             end
             noisy_state = QI.ptrace(proj(ket_noise), [dim_A, dim_B, dim_B], 3)
-            rho_B = QI.ptrace(noisy_state, [dim_A, dim_B], 1)
+            # rho_B = QI.ptrace(noisy_state, [dim_A, dim_B], 1)
 
-            # _eigvals = eigvals(noisy_state)
-            # num_nonzero_eigvals = sum(sqrt.(conj.(_eigvals).*_eigvals).>1e-6)
-            Isometry = eigvecs(noisy_state)[:,dim_AB-3:dim_AB]
-            # for i in 1:num_out[1]
-            #     for j in 1:num_out[2]
-            #         Isometry[:,(i-1)*4+j] += kron(ket(i,dim_A), Bob_bases[:, j])
-            #     end
-            # end
-            # Isometry = Matrix(qr(Isometry).Q)
-
-            KeyMap = zeros(ComplexF64, dim_AB*dim_A, dim_AB)
-            for i in 1:num_out[2]
-                if i != 4
-                    KeyMap += kron(ket(i, num_out[2]), I(dim_A), sqrt(B[:,:,i,1]))
-                else
-                    B_last = I(dim_B) - sum(B[:,:,:,1];dims=3)
-                    KeyMap += kron(ket(i, num_out[2]), I(dim_A), sqrt(B_last[:,:,1]))
-                end
-            end
-
-
-            post_state = KeyMap * noisy_state * KeyMap'
-            # post_state = QI.ptrace(post_state, [dim_A, dim_A, dim_B], [2,3])
+            _eigvals = eigvals(noisy_state)
+            Isometry = eigvecs(noisy_state)[:, sqrt.(conj.(_eigvals).*_eigvals).>1e-6]
 
             full_measurements = ddqkd.fullMeasurement(A, dim_A, B, dim_B)
             numberOp = photonic.numberOperator(dim_B)
-            posQuadOp = (photonic.creation(dim_B) + photonic.annihilation(dim_B))./sqrt(2)
-            momQuadOp = (photonic.creation(dim_B) - photonic.annihilation(dim_B)).*im./sqrt(2)
-            secondMomentOp = photonic.creation(dim_B)^2 + photonic.annihilation(dim_B)^2
-            statis_check_meas = cat(full_measurements, kron(I(dim_A), numberOp), dims=3)
-            observed_statis = ddqkd.measurementStatistics(noisy_state, statis_check_meas)
+            posQuadOp = (photonic.creation(dim_B) +
+                            photonic.annihilation(dim_B))./sqrt(2)
+            momQuadOp = (photonic.creation(dim_B) -
+                            photonic.annihilation(dim_B)).*im./sqrt(2)
+            secondMomentOp = photonic.creation(dim_B)^2 +
+                                photonic.annihilation(dim_B)^2
+            statis_check_meas = cat(full_measurements,
+                                    kron(I(dim_A), numberOp), dims=3)
+            observed_statis = ddqkd.measurementStatistics(noisy_state, 
+                                                          statis_check_meas)
             ## Print probabilities computed by the given state and measurements
             # display(observed_statis)
 
@@ -124,7 +115,6 @@ data_key_rate = zeros(num_alpha)
             #                             tomography = true, state = noisy_state,
             #                             solver = SOLVER, solver_args = SOLVER_ARGS)
 
-            
             h_AE, omega_AB = ddqkd.singleRoundEntropy(
                                         NUM_QUAD, B, PARTY, INPUT, dim_A, dim_B;
                                         statis_check_meas = statis_check_meas,
@@ -132,23 +122,23 @@ data_key_rate = zeros(num_alpha)
                                         reduce_A = true, rho_A = rho_A,
                                         # reduce_B = true, rho_B = rho_B,
                                         proj2support = true, isometry = Isometry,
-                                        setNormConstr = true,
+                                        # setNormConstr = true,
                                         solver = SOLVER, solver_args = SOLVER_ARGS)
 
             println("h_AE ", h_AE)
             data_hAE[i] = h_AE
-            rho_AB = Isometry * omega_AB * Isometry'
-
+            # rho_AB = Isometry * omega_AB * Isometry'
+            # td = trace_distance(noisy_state, rho_AB)
+            # println("Trace distance between theoritical state ",
+            #         "and numerical optimized state: $td")
             ## Print reduced states
             ### Print rho_A
             # display(QI.ptrace(rho_AB, [dim_A, dim_B], 2))
             ### Print rho_B
             # display(QI.ptrace(rho_AB, [dim_A, dim_B], 1))
 
-            Prob = ddqkd.measurementStatistics(rho_AB, full_measurements,
+            Prob = ddqkd.measurementStatistics(noisy_state, full_measurements,
                                                 shape = Tuple(dim), trans = true)
-            ## Print probabilities computed by the state after optimization
-            # display(Prob)
             ec_cost = errorCorrectionCost(Prob)
             data_ec_cost[i] = ec_cost
             # println("ec cost ", ec_cost)
